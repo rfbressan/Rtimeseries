@@ -1,0 +1,85 @@
+---
+title: "Códigos da Aula 13"
+subtitle: "Econometria II"
+author: "Andre Portela Santos"
+output: html_document
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE}
+list.of.packages <- c("quantmod","xts","rmgarch","PerformanceAnalytics")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+library(quantmod)
+library(xts)
+library(rmgarch)
+library(PerformanceAnalytics)
+```
+
+# Baixa dados dos seguintes ativos:
+
+```{r}
+# SPY: SPDR S&P 500 ETF Trust
+# IJS: S&P SmallCap 600 Value Idx (ETF)
+# EFA: ETF large- and mid-capitalization developed market equities
+# EEM: SCI Emerging Markets Indx (ETF)
+# AGG: iShares Barclays Aggregate Bond Fund
+symbols <- c("SPY","IJS","EFA","EEM","AGG")
+getSymbols(symbols, src = 'google', from = "2010-01-01", 
+             auto.assign = TRUE, warnings = FALSE) 
+prices <- merge(SPY,IJS,EFA,EEM,AGG)
+prices <- prices[,grepl( "Close" , names(prices) )]
+colnames(prices) <- symbols
+returns <- na.omit(Return.calculate(prices, method = "log"))*100
+plot.xts(returns)
+```
+
+
+# Estima modelo DCC-GARCH usando pacote rmgarch
+
+```{r}
+spec1 <- ugarchspec(distribution = "std")
+mspec <- multispec(c(spec1,spec1,spec1,spec1,spec1))
+dcc.spec<-dccspec(mspec,VAR=TRUE,lag=1,dccOrder=c(1,1),model="DCC",distribution="mvt")
+d.fit.2<-dccfit(dcc.spec,returns)
+cov.dcc <- rcov(d.fit.2)
+# plota vari?ncia conditional da s?rie SPY
+ts.plot(cov.dcc[1,1,])
+# plota correla??o conditional entre SPY,EEM
+ts.plot(cov.dcc[1,4,]/(sqrt(cov.dcc[1,1,])*sqrt(cov.dcc[4,4,])))
+```
+
+# Obt?m carteira de vari?ncia m?nima
+
+```{r}
+T <- dim(returns)[1]
+N <- dim(returns)[2]
+e <- rep(1,N)
+weights <- matrix(nrow = N, ncol = T)
+for (t in 1:T) {
+  A <- (solve(cov.dcc[, , t])%*%e)
+  B <- as.numeric((e%*%solve(cov.dcc[, , t])%*%e))
+  weights[,t] <- A/B
+}
+# plota pesos
+ts.plot(t(weights))
+```
+
+
+# Estima valor-em-risco a 99% para o portfolio
+
+```{r}
+T <- dim(returns)[1]
+gl <- d.fit.2@mfit$coef[23]
+q <- qt(0.01, gl)
+VaR <- matrix(nrow = T, ncol = 1)
+portf.ret <- matrix(nrow = T, ncol = 1)
+for (t in 1:T) {
+  portf.ret[t] <- returns[t,]%*%weights[,t]
+  VaR[t] <- sqrt(weights[,t]%*%cov.dcc[ , , t]%*%weights[,t])*q 
+}
+ts.plot(cbind(portf.ret,VaR))
+```
